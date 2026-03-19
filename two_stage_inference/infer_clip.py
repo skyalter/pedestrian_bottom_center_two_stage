@@ -1,5 +1,7 @@
 import argparse
+import csv
 import json
+import time
 from pathlib import Path
 
 import cv2
@@ -45,6 +47,7 @@ def list_frames(source_dir: Path) -> list[Path]:
 
 
 def main() -> None:
+    t0_clip = time.perf_counter()
     args = parse_args()
     source_dir = Path(args.source_dir).resolve()
     if not source_dir.is_dir():
@@ -65,6 +68,7 @@ def main() -> None:
     video_path = clip_dir / f"{source_dir.name}_overlay.mp4"
 
     for frame_idx, frame_path in enumerate(frames):
+        t0_frame = time.perf_counter()
         frame_args = argparse.Namespace(
             source=str(frame_path),
             det_weights=args.det_weights or str(
@@ -85,6 +89,7 @@ def main() -> None:
         )
 
         summary = run_two_stage_image(frame_args)
+        frame_total_ms = (time.perf_counter() - t0_frame) * 1000.0
         overlay = cv2.imread(summary["overlay_path"], cv2.IMREAD_COLOR)
         if overlay is None:
             raise RuntimeError(f"Cannot read frame overlay: {summary['overlay_path']}")
@@ -108,6 +113,8 @@ def main() -> None:
                 "overlay_path": summary["overlay_path"],
                 "json_path": summary["json_path"],
                 "num_detections": summary["num_detections"],
+                "timing_ms": summary["timing_ms"],
+                "frame_total_ms": frame_total_ms,
             }
         )
 
@@ -119,6 +126,14 @@ def main() -> None:
         "num_frames": len(frames),
         "fps": args.fps,
         "video_path": str(video_path),
+        "timing_ms": {
+            "total": (time.perf_counter() - t0_clip) * 1000.0,
+            "avg_per_frame": (
+                sum(frame["frame_total_ms"] for frame in frame_summaries) / len(frame_summaries)
+                if frame_summaries else 0.0
+            ),
+            "sum_frame_total": sum(frame["frame_total_ms"] for frame in frame_summaries),
+        },
         "frames": frame_summaries,
         "params": {
             "det_weights": args.det_weights,
@@ -133,11 +148,46 @@ def main() -> None:
         },
     }
     summary_path = clip_dir / f"{source_dir.name}_summary.json"
+    csv_path = clip_dir / f"{source_dir.name}_timing.csv"
     summary_path.write_text(json.dumps(clip_summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    with csv_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            [
+                "frame_index",
+                "frame_name",
+                "num_detections",
+                "detector_ms",
+                "bottom_center_ms",
+                "frame_total_ms",
+                "overlay_path",
+                "json_path",
+            ]
+        )
+        for frame in frame_summaries:
+            writer.writerow(
+                [
+                    frame["frame_index"],
+                    frame["frame_name"],
+                    frame["num_detections"],
+                    f"{frame['timing_ms']['detector']:.4f}",
+                    f"{frame['timing_ms']['bottom_center']:.4f}",
+                    f"{frame['frame_total_ms']:.4f}",
+                    frame["overlay_path"],
+                    frame["json_path"],
+                ]
+            )
+
     print(f"[OK] frames: {len(frames)}")
+    print(
+        "[OK] timing_ms: "
+        f"total={clip_summary['timing_ms']['total']:.2f}, "
+        f"avg_per_frame={clip_summary['timing_ms']['avg_per_frame']:.2f}"
+    )
     print(f"[OK] video: {video_path}")
     print(f"[OK] summary: {summary_path}")
+    print(f"[OK] csv: {csv_path}")
 
 
 if __name__ == "__main__":

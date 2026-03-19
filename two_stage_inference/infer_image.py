@@ -2,6 +2,7 @@ import argparse
 import json
 import math
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -54,6 +55,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def run_two_stage_image(args: argparse.Namespace) -> dict:
+    t0_total = time.perf_counter()
     source_path = Path(args.source).resolve()
     image = cv2.imread(str(source_path), cv2.IMREAD_COLOR)
     if image is None:
@@ -68,6 +70,7 @@ def run_two_stage_image(args: argparse.Namespace) -> dict:
     crop_dir.mkdir(parents=True, exist_ok=True)
 
     detector = YOLO(args.det_weights)
+    t0_det = time.perf_counter()
     det_results = detector.predict(
         source=str(source_path),
         imgsz=args.det_imgsz,
@@ -78,6 +81,7 @@ def run_two_stage_image(args: argparse.Namespace) -> dict:
     )
     if not det_results:
         raise RuntimeError("Detector returned no result")
+    t_det_ms = (time.perf_counter() - t0_det) * 1000.0
 
     boxes = det_results[0].boxes
     crops: list[np.ndarray] = []
@@ -122,7 +126,9 @@ def run_two_stage_image(args: argparse.Namespace) -> dict:
             )
 
     bc_results = []
+    t_bc_ms = 0.0
     if crops:
+        t0_bc = time.perf_counter()
         bc_results = infer_images(
             images=crops,
             class_ids=[args.class_id] * len(crops),
@@ -132,6 +138,7 @@ def run_two_stage_image(args: argparse.Namespace) -> dict:
             img_size=(args.bc_h, args.bc_w),
             save_dir=str(crop_overlay_dir),
         )
+        t_bc_ms = (time.perf_counter() - t0_bc) * 1000.0
 
     overlay = image.copy()
     detections = []
@@ -196,6 +203,11 @@ def run_two_stage_image(args: argparse.Namespace) -> dict:
         "detections": detections,
         "overlay_path": str(overlay_path),
         "json_path": str(json_path),
+        "timing_ms": {
+            "detector": t_det_ms,
+            "bottom_center": t_bc_ms,
+            "total": (time.perf_counter() - t0_total) * 1000.0,
+        },
     }
     json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     return summary
@@ -206,6 +218,12 @@ def main() -> None:
     summary = run_two_stage_image(args)
 
     print(f"[OK] detections: {summary['num_detections']}")
+    print(
+        "[OK] timing_ms: "
+        f"total={summary['timing_ms']['total']:.2f}, "
+        f"detector={summary['timing_ms']['detector']:.2f}, "
+        f"bottom_center={summary['timing_ms']['bottom_center']:.2f}"
+    )
     print(f"[OK] overlay: {summary['overlay_path']}")
     print(f"[OK] json: {summary['json_path']}")
 
