@@ -1,9 +1,12 @@
 # Runtime outputs
+runs/
 stage1_yolo26/runs/
 stage2_bottom_box_center/logs/
 stage2_bottom_box_center/checkpoints/
 stage2_bottom_box_center/infer_vis/
-two_stage_inference/runs/
+
+# Model weights
+stage1_yolo26/*.pt
 
 # Generated datasets
 generated_bottom_center_dataset/images/

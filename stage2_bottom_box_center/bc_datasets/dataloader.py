@@ -4,7 +4,7 @@
 import numpy as np
 from torch.utils.data import DataLoader, Subset
 
-from datasets.dataset import BottomCenterCocoDataset, BottomCenterYoloKeypointDataset
+from bc_datasets.dataset import BottomCenterCocoDataset, BottomCenterYoloKeypointDataset
 
 def build_datasets(
     dataset_format: str = "coco_bbox",
